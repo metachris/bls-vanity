@@ -6,13 +6,17 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	blst "github.com/supranational/blst/bindings/go"
+	"log"
 	"math/big"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
+
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/flashbots/go-boost-utils/bls"
+	blst "github.com/supranational/blst/bindings/go"
 )
 
 type PublicKey = blst.P1Affine
@@ -37,8 +41,22 @@ func searchForSeed(count *uint64, maxTries int, prefix []byte, wg *sync.WaitGrou
 		hasPrefix(pk, prefix)
 
 		if hasPrefix(pk, prefix) {
-			fmt.Println("secret key", hex.EncodeToString(sk.Serialize()))
-			fmt.Println("public key", hex.EncodeToString(pk.Serialize()))
+			skx := hex.EncodeToString(sk.Serialize())
+			// fmt.Println("public key", hex.EncodeToString(pk.Serialize()))
+
+			_sk := SecretKeyFromHexString("0x" + skx)
+			_pk, _err := bls.PublicKeyFromSecretKey(_sk)
+			if _err != nil {
+				panic(_err)
+			}
+
+			pkHex := fmt.Sprintf("0x%x", bls.PublicKeyToBytes(_pk))
+			if strings.HasPrefix(pkHex, "0xa") {
+				fmt.Println("secret key", skx)
+				fmt.Printf("%s\n\n", pkHex)
+				os.Exit(0)
+			}
+
 			break
 		}
 
@@ -79,21 +97,21 @@ func main() {
 	}
 
 	var count *uint64 = new(uint64)
-	start := time.Now()
+	// start := time.Now()
 
 	triesNeeded := new(big.Int).Exp(big.NewInt(256), big.NewInt(int64(len(prefix))), nil)
 	triesNeeded.Div(triesNeeded, big.NewInt(9)) // bias because first byte may be only 0-26
-	go func() {
-		for {
-			time.Sleep(time.Second * 5)
-			perSec := atomic.LoadUint64(count) / uint64(time.Since(start).Seconds())
+	// go func() {
+	// 	for {
+	// 		time.Sleep(time.Second * 5)
+	// 		perSec := atomic.LoadUint64(count) / uint64(time.Since(start).Seconds())
 
-			secs := new(big.Int).Div(triesNeeded, big.NewInt(int64(perSec)))
+	// 		secs := new(big.Int).Div(triesNeeded, big.NewInt(int64(perSec)))
 
-			expectedWait := time.Second * time.Duration(secs.Uint64())
-			fmt.Println("tries per sec:", perSec, "expected wait time:", expectedWait, "time spent:", time.Since(start).Truncate(time.Second))
-		}
-	}()
+	// 		expectedWait := time.Second * time.Duration(secs.Uint64())
+	// 		fmt.Println("tries per sec:", perSec, "expected wait time:", expectedWait, "time spent:", time.Since(start).Truncate(time.Second))
+	// 	}
+	// }()
 
 	var wg sync.WaitGroup
 	for i := 0; i < *cpu; i++ {
@@ -102,4 +120,19 @@ func main() {
 	}
 
 	wg.Wait()
+}
+
+// SecretKeyFromHexString converts a hex string to a BLS secret key
+func SecretKeyFromHexString(secretKeyHex string) *bls.SecretKey {
+	skBytes, err := hexutil.Decode(secretKeyHex)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	blsSecretKey, err := bls.SecretKeyFromBytes(skBytes[:])
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	return blsSecretKey
 }
